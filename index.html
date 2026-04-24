@@ -733,7 +733,7 @@
   </div>
 
   <div class="input-wrapper">
-    <textarea id="messageInput" placeholder="Paste suspicious email, SMS, or link... (Ctrl+Enter to scan, Esc to clear)">Dear customer, your account will be suspended! Verify now: http://secure-v[...]
+    <textarea id="messageInput" placeholder="Paste suspicious email, SMS, or link... (Ctrl+Enter to scan, Esc to clear)">Dear customer, your account will be suspended! Verify now: http://secure-verify.xyz/urgent</textarea>
   </div>
 
   <div id="urlReputationCard" class="url-reputation-card hidden">
@@ -910,7 +910,7 @@
         addRule('Excessive CAPS / exclamation marks', 20);
       }
 
-      const scamPhrases = ['dear customer', 'click link below', 'confirm now', 'update your account', 'verify your account', 'account will be', 'delivery failed', 'package', 'reset password'];
+      const scamPhrases = ['dear customer', 'click link below', 'confirm now', 'update your account', 'verify your account', 'account will be', 'delivery failed', 'package', 'reset password', 'suspended', 'deleted', 'hack'];
       let scamCount = scamPhrases.filter(ph => lower.includes(ph)).length;
       if (scamCount > 0) {
         let pts = Math.min(35, 10 + scamCount * 5);
@@ -998,115 +998,113 @@
       donutChart.style.setProperty('--donut-percent', analysis.score);
       donutChart.style.setProperty('--donut-color', levelInfo.color);
       donutScore.textContent = analysis.score + '%';
-
+      
+      const explanationRaw = generateExplanation(analysis.score, analysis.triggered);
+      explanationText.innerHTML = applyHighlights(explanationRaw, analysis.matchedTerms, inputText);
       explanationBox.style.borderLeftColor = levelInfo.color;
-      explanationText.innerHTML = applyHighlights(generateExplanation(analysis.score, analysis.triggered), analysis.matchedTerms, inputText);
-
-      confidenceDisplay.textContent = analysis.score < 30 ? '✓ High confidence' : analysis.score < 60 ? '⚠ Medium confidence' : '✗ High confidence';
       
       actionText.textContent = getActionSteps(analysis.score);
-
-      friendlyNote.innerHTML = analysis.score >= 60 ? '<i class="fas fa-exclamation-circle" style="color:#e74c3c;"></i> Report to your bank or authorities.' : '';
-
-      currentResult = { score: analysis.score, level: levelInfo.level, explanation: explanationText.innerHTML, ruleBreakdown: analysis.ruleBreakdown, preview: inputText.substring(0, 50) };
+      
+      let friendly = '';
+      if (analysis.score >= 50) friendly = '<i class="fas fa-exclamation-triangle warn-color"></i> This one looks suspicious—abeg shine your eye!';
+      else if (analysis.score >= 30) friendly = '<i class="fas fa-info-circle warn-color"></i> Better check well.';
+      friendlyNote.innerHTML = friendly;
+      
+      confidenceDisplay.textContent = analysis.score >= 60 ? 'High confidence' : (analysis.score >= 30 ? 'Medium confidence' : 'Low confidence');
+      
+      renderRuleDetails(analysis.ruleBreakdown);
+      updateUrlCard(inputText);
+      resultPanel.classList.remove('hidden');
+      updateRandomTip();
+      
+      currentResult = { ...analysis, level: levelInfo.level, preview: inputText.slice(0,55)+'…', timestamp: new Date().toLocaleTimeString() };
     }
 
-    function displayRuleDetails() {
-      if (currentResult.ruleBreakdown.length === 0) {
-        ruleDetailsPanel.innerHTML = '<li style="justify-content:center; color:#6d8bb2;">No rules triggered.</li>';
-        return;
+    function renderRuleDetails(breakdown) {
+      if (!breakdown.length) ruleDetailsPanel.innerHTML = '<li style="justify-content:center;">No rules triggered.</li>';
+      else {
+        ruleDetailsPanel.innerHTML = breakdown.map(r => `<li><span>${r.name}</span><span class="rule-points">+${r.points}</span></li>`).join('');
       }
-      const html = currentResult.ruleBreakdown.map(rule => `<li><span>${rule.name}</span><span class="rule-points">+${rule.points}</span></li>`).join('');
-      ruleDetailsPanel.innerHTML = html;
     }
 
-    function scan() {
-      const text = textarea.value.trim();
-      if (!text) {
-        alert('Please enter text to scan.');
-        return;
-      }
-
+    async function performScan() {
+      const input = textarea.value;
       loadingIndicator.classList.remove('hidden');
       resultPanel.classList.add('hidden');
-      ruleDetailsPanel.classList.add('hidden');
-
-      setTimeout(() => {
-        const analysis = calculateRisk(text);
-        updateUrlCard(text);
-        updateUI(analysis, text);
-        loadingIndicator.classList.add('hidden');
-        resultPanel.classList.remove('hidden');
-        addToHistory(text.substring(0, 50), analysis.score);
-      }, 1000);
-    }
-
-    function addToHistory(preview, score) {
-      let history = JSON.parse(localStorage.getItem('scanHistory') || '[]');
-      history.unshift({ preview, score, time: new Date().toLocaleTimeString() });
-      history = history.slice(0, 10);
-      localStorage.setItem('scanHistory', JSON.stringify(history));
-      renderHistory();
-    }
-
-    function renderHistory() {
-      let history = JSON.parse(localStorage.getItem('scanHistory') || '[]');
-      if (history.length === 0) {
-        historyList.innerHTML = '<li style="color:#6d8bb2; justify-content:center;">No scans yet</li>';
-        return;
+      scanBtn.disabled = true;
+      const steps = ['Checking URL reputation...', 'Analyzing language patterns...', 'Generating risk score...'];
+      for (let i=0; i<steps.length; i++) {
+        loadingMessage.textContent = steps[i];
+        await new Promise(r => setTimeout(r, 250));
       }
-      historyList.innerHTML = history.map(item => `
-        <li class="history-item">
-          <span class="history-preview">${item.preview}</span>
-          <span style="color:${item.score < 30 ? '#2ecc71' : item.score < 60 ? '#f1c40f' : '#e74c3c'};">${item.score}%</span>
-        </li>
-      `).join('');
+      const analysis = calculateRisk(input);
+      updateUI(analysis, input);
+      addCurrentToHistory();
+      loadingIndicator.classList.add('hidden');
+      scanBtn.disabled = false;
     }
 
-    scanBtn.addEventListener('click', scan);
-    textarea.addEventListener('keydown', e => {
-      if (e.ctrlKey && e.key === 'Enter') scan();
-      if (e.key === 'Escape') textarea.value = '';
-    });
+    function loadSample() {
+      textarea.value = "Dear customer, your account will be suspended! Verify now: http://secure-verify.xyz/urgent";
+      performScan();
+    }
 
-    sampleBtn.addEventListener('click', () => {
-      textarea.value = 'Dear customer, your account will be suspended! Verify now: http://secure-verify.xyz/bank-login';
-    });
+    const STORAGE_KEY = 'smartshield_history';
+    function loadHistory() { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); }
+    function saveHistoryEntry(entry) {
+      const history = loadHistory();
+      history.unshift(entry); if (history.length > 8) history.pop();
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
+      renderHistoryList(history);
+    }
+    function renderHistoryList(history) {
+      if (!history.length) { historyList.innerHTML = '<li style="color:#6d8bb2; justify-content:center;">No scans yet</li>'; return; }
+      historyList.innerHTML = history.map(item => {
+        let icon = '<i class="fas fa-check-circle safe-color"></i>';
+        if (item.level.includes('SUSPICIOUS')) icon = '<i class="fas fa-exclamation-triangle warn-color"></i>';
+        if (item.level.includes('DANGER')) icon = '<i class="fas fa-times-circle danger-color"></i>';
+        return `<li class="history-item"><span>${icon}</span><span class="history-preview">${item.preview}</span><span>${item.time}</span></li>`;
+      }).join('');
+    }
+    function addCurrentToHistory() { if(currentResult.preview) saveHistoryEntry({ preview: currentResult.preview, level: currentResult.level, time: currentResult.timestamp }); }
+    function clearHistory() { localStorage.removeItem(STORAGE_KEY); renderHistoryList([]); }
 
-    copyBtn.addEventListener('click', () => {
-      const text = `${currentResult.level} (${currentResult.score}%): ${currentResult.explanation}`;
-      navigator.clipboard.writeText(text).then(() => alert('Copied!'));
-    });
+    function copyReport() {
+      if (!currentResult.explanation) return;
+      navigator.clipboard?.writeText(`SmartShield: ${currentResult.level} (${currentResult.score}% risk) — ${currentResult.explanation}`).then(() => {
+        copyBtn.innerHTML = '<i class="fas fa-check"></i> Copied!'; setTimeout(() => copyBtn.innerHTML = '<i class="fas fa-copy"></i> Copy', 1500);
+      });
+    }
 
-    shareBtn.addEventListener('click', () => {
-      const text = `Check this for scams: SmartShield detected ${currentResult.level} risk (${currentResult.score}%)`;
-      if (navigator.share) navigator.share({ text });
-      else alert('Share: ' + text);
-    });
-
-    clearHistoryBtn.addEventListener('click', () => {
-      localStorage.removeItem('scanHistory');
-      renderHistory();
-    });
-
-    learnWhyToggle.addEventListener('click', () => {
-      ruleDetailsPanel.classList.toggle('hidden');
-      if (!ruleDetailsPanel.classList.contains('hidden')) displayRuleDetails();
-    });
-
-    themeToggle.addEventListener('click', () => {
+    function toggleTheme() {
       document.body.classList.toggle('light-mode');
-      localStorage.setItem('theme', document.body.classList.contains('light-mode') ? 'light' : 'dark');
       themeToggle.innerHTML = document.body.classList.contains('light-mode') ? '<i class="fas fa-sun"></i>' : '<i class="fas fa-moon"></i>';
-    });
-
-    if (localStorage.getItem('theme') === 'light') {
-      document.body.classList.add('light-mode');
-      themeToggle.innerHTML = '<i class="fas fa-sun"></i>';
     }
 
-    updateRandomTip();
-    renderHistory();
+    function handleKeyDown(e) {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); performScan(); }
+      if (e.key === 'Escape') { textarea.value = ''; urlReputationCard.classList.add('hidden'); }
+    }
+
+    function toggleRuleDetails() {
+      const expanded = ruleDetailsPanel.classList.toggle('hidden');
+      learnWhyToggle.innerHTML = expanded ? '<i class="fas fa-chevron-circle-right"></i> Learn why' : '<i class="fas fa-chevron-circle-down"></i> Hide details';
+    }
+
+    function init() {
+      renderHistoryList(loadHistory());
+      updateRandomTip();
+      scanBtn.addEventListener('click', performScan);
+      sampleBtn.addEventListener('click', loadSample);
+      textarea.addEventListener('keydown', handleKeyDown);
+      copyBtn.addEventListener('click', copyReport);
+      shareBtn.addEventListener('click', () => copyReport());
+      clearHistoryBtn.addEventListener('click', clearHistory);
+      themeToggle.addEventListener('click', toggleTheme);
+      learnWhyToggle.addEventListener('click', toggleRuleDetails);
+    }
+
+    init();
   })();
 </script>
 </body>
